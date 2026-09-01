@@ -1,12 +1,15 @@
 FROM python:3.10-slim
 
+# Install system dependencies (FFmpeg & ImageMagick)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     imagemagick \
     git \
     && rm -rf /var/lib/apt-get/lists/*
 
-RUN sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
+# Dynamically patch ImageMagick policy (works for v6 and v7)
+RUN POLICY_FILE=$(find /etc -name "policy.xml" | grep ImageMagick) && \
+    sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' "$POLICY_FILE"
 
 WORKDIR /app
 COPY requirements.txt .
