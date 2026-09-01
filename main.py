@@ -19,7 +19,6 @@ def render_short():
     if not video_urls or not audio_url:
         return jsonify({"status": "error", "message": "Missing video_urls or audio_url"}), 400
 
-    # Create a temporary file to list inputs safely for FFmpeg concat demuxer
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
         for url in video_urls:
             f.write(f"file '{url}'\n")
@@ -27,6 +26,7 @@ def render_short():
 
     cmd = [
         'ffmpeg', '-y',
+        '-protocol_whitelist', 'file,http,https,tcp,tls',
         '-f', 'concat',
         '-safe', '0',
         '-i', manifest_path,
