@@ -26,7 +26,6 @@ def render_short():
     output_path = f"/tmp/{job_id}_final.mp4"
     
     try:
-        # Step 1: Download and scale/crop videos individually using ffmpeg to 720x1280
         processed_v_paths = []
         for idx, url in enumerate(video_urls):
             raw_v_path = f"/tmp/{job_id}_raw_{idx}.mp4"
@@ -38,7 +37,6 @@ def render_short():
                 for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
             
-            # FFmpeg filter: scale to height 1280, crop center to 720 width (9:16 aspect ratio)
             cmd = [
                 'ffmpeg', '-y', '-i', raw_v_path,
                 '-vf', 'scale=-2:1280,crop=720:1280:(in_w-720)/2:0',
@@ -47,19 +45,16 @@ def render_short():
             subprocess.run(cmd, check=True)
             processed_v_paths.append(proc_v_path)
 
-        # Step 2: Download Audio
         r_audio = requests.get(audio_url, stream=True)
         with open(a_path, 'wb') as f:
             for chunk in r_audio.iter_content(chunk_size=1024*1024):
                 f.write(chunk)
 
-        # Step 3: Create FFmpeg concat list file
         with open(list_path, 'w') as f:
             for vp in processed_v_paths:
                 f.write(f"file '{vp}'\n")
         v_paths.append(list_path)
 
-        # Step 4: Concatenate video parts and merge with audio track
         concat_cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path,
             '-i', a_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path
@@ -75,7 +70,6 @@ def render_short():
         return jsonify({"status": "error", "message": str(e)}), 500
         
     finally:
-        # Cleanup temporary files
         for vp in v_paths:
             if os.path.exists(vp):
                 os.remove(vp)
