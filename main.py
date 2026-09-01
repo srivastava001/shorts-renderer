@@ -4,12 +4,10 @@ import uuid
 import requests
 from flask import Flask, request, jsonify, send_file
 from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
-import whisper
+from openai import OpenAI
 
 app = Flask(__name__)
-
-# Load lightweight Whisper model for Render 512MB RAM limit
-model = whisper.load_model("tiny")
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -36,7 +34,6 @@ def render_short():
                 for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
             
-            # MoviePy v2.0+ uses .resized() and .cropped()
             clip = VideoFileClip(v_path).resized(height=1920)
             clip = clip.cropped(x_center=clip.w / 2, width=1080)
             downloaded_clips.append(clip)
@@ -55,33 +52,39 @@ def render_short():
         
         audio_clip = AudioFileClip(a_path)
 
-        # Step C: Concatenate Clips & Attach Audio (MoviePy v2.0+ uses .with_audio)
+        # Step C: Concatenate Clips & Attach Audio
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
         base_video = base_video.with_audio(audio_clip)
 
-        # Step D: Transcribe Audio for Word Timestamps
-        result = model.transcribe(a_path, word_timestamps=True)
-        subtitle_clips = []
+        # Step D: Transcribe via OpenAI API (Zero Local RAM Usage)
+        with open(a_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="verbose_json",
+                timestamp_granularities=["word"]
+            )
 
-        for segment in result.get('segments', []):
-            for word in segment.get('words', []):
-                w_text = word['word'].strip().upper()
-                start = word['start']
-                end = word['end']
-                
-                # MoviePy v2.0+ text clip syntax
-                txt_clip = (TextClip(text=w_text, font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
-                            .with_position(('center', 1400))
-                            .with_start(start)
-                            .with_duration(max(end - start, 0.1)))
-                subtitle_clips.append(txt_clip)
+        subtitle_clips = []
+        words = getattr(transcript, 'words', [])
+        
+        for word_info in words:
+            w_text = word_info['word'].strip().upper()
+            start = word_info['start']
+            end = word_info['end']
+            
+            txt_clip = (TextClip(text=w_text, font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
+                        .with_position(('center', 1400))
+                        .with_start(start)
+                        .with_duration(max(end - start, 0.1)))
+            subtitle_clips.append(txt_clip)
 
         # Step E: Layer Captions & Export MP4
         final_video = CompositeVideoClip([base_video] + subtitle_clips)
         output_path = f"/tmp/{job_id}_final.mp4"
         final_video.write_videofile(output_path, fps=30, codec="libx264", audio_codec="aac")
 
-        # Cleanup memory resources
+        # Memory Cleanup
         base_video.close()
         audio_clip.close()
 
