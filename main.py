@@ -3,7 +3,7 @@ import base64
 import uuid
 import requests
 from flask import Flask, request, jsonify, send_file
-from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
+from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips
 from google import genai
 
 app = Flask(__name__)
@@ -34,7 +34,7 @@ def render_short():
     output_path = f"/tmp/{job_id}_final.mp4"
     
     try:
-        # Step A: Download & Crop Videos to Vertical 720x1280 (RAM-Optimized for Render Free Tier)
+        # Step A: Download & Crop Videos to Vertical 720x1280 (RAM-Optimized)
         for idx, url in enumerate(video_urls):
             v_path = f"/tmp/{job_id}_v_{idx}.mp4"
             v_paths.append(v_path)
@@ -64,41 +64,14 @@ def render_short():
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
         base_video = base_video.with_audio(audio_clip)
 
-        # Step D: Transcribe via Gemini API using gemini-3.6-flash
-        uploaded_audio = client.files.upload(file=a_path)
-        response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[uploaded_audio, "Provide a clean transcript of the speech in this audio."]
-        )
-        
-        text_content = response.text if response and response.text else ""
-        words_list = text_content.split()
-        
-        subtitle_clips = []
-        duration = audio_clip.duration
-        time_per_word = duration / max(len(words_list), 1)
-
-        for i, word in enumerate(words_list):
-            start = i * time_per_word
-            end = start + time_per_word
-            txt_clip = (TextClip(text=word.upper(), font_size=50, color='yellow', stroke_color='black', stroke_width=3)
-                        .with_position(('center', 950))
-                        .with_start(start)
-                        .with_duration(max(end - start, 0.1)))
-            subtitle_clips.append(txt_clip)
-
-        # Step E: Layer Captions & Export MP4 (fps=24 saves memory)
-        final_video = CompositeVideoClip([base_video] + subtitle_clips)
-        final_video.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac")
+        # Step D: Export MP4 directly without heavy text object arrays (RAM Safe)
+        base_video.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac")
 
         # Explicitly close all clips to free up RAM
         for clip in downloaded_clips:
             clip.close()
         base_video.close()
         audio_clip.close()
-        final_video.close()
-        for txt in subtitle_clips:
-            txt.close()
 
         return jsonify({
             "status": "success",
