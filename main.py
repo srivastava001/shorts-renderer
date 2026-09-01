@@ -4,7 +4,7 @@ import uuid
 import requests
 from flask import Flask, request, jsonify, send_file
 from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
-from openai import OpenAI
+from google import genai
 
 app = Flask(__name__)
 
@@ -14,12 +14,11 @@ def health_check():
 
 @app.route('/render-short', methods=['POST'])
 def render_short():
-    # Initialize client dynamically inside the request to prevent startup crashes
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return jsonify({"status": "error", "message": "OPENAI_API_KEY environment variable is missing on Render"}), 500
+        return jsonify({"status": "error", "message": "GEMINI_API_KEY environment variable is missing on Render"}), 500
         
-    client = OpenAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     data = request.json or {}
     video_urls = data.get('video_urls', [])
@@ -62,24 +61,24 @@ def render_short():
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
         base_video = base_video.with_audio(audio_clip)
 
-        # Step D: Transcribe via OpenAI API
-        with open(a_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="verbose_json",
-                timestamp_granularities=["word"]
-            )
-
-        subtitle_clips = []
-        words = getattr(transcript, 'words', [])
+        # Step D: Transcribe via Gemini API
+        uploaded_audio = client.files.upload(file=a_path)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[uploaded_audio, "Provide a clean transcript of the speech in this audio."]
+        )
         
-        for word_info in words:
-            w_text = word_info['word'].strip().upper()
-            start = word_info['start']
-            end = word_info['end']
-            
-            txt_clip = (TextClip(text=w_text, font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
+        text_content = response.text if response and response.text else ""
+        words_list = text_content.split()
+        
+        subtitle_clips = []
+        duration = audio_clip.duration
+        time_per_word = duration / max(len(words_list), 1)
+
+        for i, word in enumerate(words_list):
+            start = i * time_per_word
+            end = start + time_per_word
+            txt_clip = (TextClip(text=word.upper(), font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
                         .with_position(('center', 1400))
                         .with_start(start)
                         .with_duration(max(end - start, 0.1)))
