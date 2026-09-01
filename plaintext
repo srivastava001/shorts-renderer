@@ -1,0 +1,6 @@
+flask
+gunicorn
+moviepy
+requests
+openai-whisper
+torch
