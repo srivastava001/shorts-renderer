@@ -2,4 +2,4 @@ flask
 gunicorn
 moviepy
 requests
-openai
+google-genai
