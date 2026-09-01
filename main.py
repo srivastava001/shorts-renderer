@@ -1,10 +1,8 @@
 import os
-import base64
 import uuid
+import subprocess
 import requests
 from flask import Flask, request, jsonify, send_file
-from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips
-from google import genai
 
 app = Flask(__name__)
 
@@ -14,12 +12,6 @@ def health_check():
 
 @app.route('/render-short', methods=['POST'])
 def render_short():
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return jsonify({"status": "error", "message": "GEMINI_API_KEY environment variable is missing on Render"}), 500
-        
-    client = genai.Client(api_key=api_key)
-
     data = request.json or {}
     video_urls = data.get('video_urls', [])
     audio_url = data.get('audio_url', '')
@@ -28,50 +20,51 @@ def render_short():
         return jsonify({"status": "error", "message": "Missing video_urls or audio_url"}), 400
 
     job_id = str(uuid.uuid4())[:8]
-    downloaded_clips = []
     v_paths = []
     a_path = f"/tmp/{job_id}_a.mp3"
+    list_path = f"/tmp/{job_id}_list.txt"
     output_path = f"/tmp/{job_id}_final.mp4"
     
     try:
-        # Step A: Download & Crop Videos to Vertical 720x1280 (RAM-Optimized)
+        # Step 1: Download and scale/crop videos individually using ffmpeg to 720x1280
+        processed_v_paths = []
         for idx, url in enumerate(video_urls):
-            v_path = f"/tmp/{job_id}_v_{idx}.mp4"
-            v_paths.append(v_path)
+            raw_v_path = f"/tmp/{job_id}_raw_{idx}.mp4"
+            proc_v_path = f"/tmp/{job_id}_v_{idx}.mp4"
+            v_paths.extend([raw_v_path, proc_v_path])
+            
             r = requests.get(url, stream=True)
-            with open(v_path, 'wb') as f:
+            with open(raw_v_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
             
-            clip = VideoFileClip(v_path).resized(height=1280)
-            clip = clip.cropped(x_center=clip.w / 2, width=720)
-            downloaded_clips.append(clip)
+            # FFmpeg filter: scale to height 1280, crop center to 720 width (9:16 aspect ratio)
+            cmd = [
+                'ffmpeg', '-y', '-i', raw_v_path,
+                '-vf', 'scale=-2:1280,crop=720:1280:(in_w-720)/2:0',
+                '-r', '24', '-c:v', 'libx264', '-crf', '28', '-an', proc_v_path
+            ]
+            subprocess.run(cmd, check=True)
+            processed_v_paths.append(proc_v_path)
 
-        # Step B: Handle Audio
-        if audio_url.startswith("data:audio") or ";base64," in audio_url:
-            base64_data = audio_url.split(";base64,")[-1]
-            with open(a_path, 'wb') as f:
-                f.write(base64.b64decode(base64_data))
-        else:
-            r_audio = requests.get(audio_url, stream=True)
-            with open(a_path, 'wb') as f:
-                for chunk in r_audio.iter_content(chunk_size=1024*1024):
-                    f.write(chunk)
-        
-        audio_clip = AudioFileClip(a_path)
+        # Step 2: Download Audio
+        r_audio = requests.get(audio_url, stream=True)
+        with open(a_path, 'wb') as f:
+            for chunk in r_audio.iter_content(chunk_size=1024*1024):
+                f.write(chunk)
 
-        # Step C: Concatenate Clips & Attach Audio
-        base_video = concatenate_videoclips(downloaded_clips, method="compose")
-        base_video = base_video.with_audio(audio_clip)
+        # Step 3: Create FFmpeg concat list file
+        with open(list_path, 'w') as f:
+            for vp in processed_v_paths:
+                f.write(f"file '{vp}'\n")
+        v_paths.append(list_path)
 
-        # Step D: Export MP4 directly without heavy text object arrays (RAM Safe)
-        base_video.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac")
-
-        # Explicitly close all clips to free up RAM
-        for clip in downloaded_clips:
-            clip.close()
-        base_video.close()
-        audio_clip.close()
+        # Step 4: Concatenate video parts and merge with audio track
+        concat_cmd = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path,
+            '-i', a_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path
+        ]
+        subprocess.run(concat_cmd, check=True)
 
         return jsonify({
             "status": "success",
@@ -82,7 +75,7 @@ def render_short():
         return jsonify({"status": "error", "message": str(e)}), 500
         
     finally:
-        # Clean up temporary files from disk
+        # Cleanup temporary files
         for vp in v_paths:
             if os.path.exists(vp):
                 os.remove(vp)
