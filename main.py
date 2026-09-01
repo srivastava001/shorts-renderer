@@ -2,7 +2,6 @@ import os
 import subprocess
 import tempfile
 import base64
-import requests
 from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
@@ -22,7 +21,6 @@ def render_short():
 
     temp_files = []
     try:
-        # Decode base64 audio data URI to a temp file to avoid command-line length limits
         if audio_input.startswith('data:'):
             header, encoded = audio_input.split(',', 1)
             audio_data = base64.b64decode(encoded)
@@ -34,18 +32,21 @@ def render_short():
         else:
             audio_path = audio_input
 
-        # Build clean command using local paths
+        # Reduced to 480p vertical with aggressive memory limits for Render's free tier
         cmd = [
             'ffmpeg', '-y',
             '-i', video_urls[0],
             '-i', audio_path,
-            '-filter_complex', '[0:v]scale=-2:1280,crop=720:1280:(in_w-720)/2:0,fps=24[outv]',
+            '-filter_complex', '[0:v]scale=-2:480,crop=270:480:(in_w-270)/2:0,fps=24[outv]',
             '-map', '[outv]',
             '-map', '1:a',
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '28',
+            '-preset', 'ultrafast',
+            '-crf', '32',
+            '-maxrate', '600k',
+            '-bufsize', '1200k',
             '-c:a', 'aac',
+            '-b:a', '64k',
             '-shortest',
             '-f', 'mp4',
             '-movflags', 'frag_keyframe+empty_moov',
@@ -56,7 +57,7 @@ def render_short():
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 while True:
-                    chunk = process.stdout.read(65536)
+                    chunk = process.stdout.read(16384)
                     if not chunk:
                         break
                     yield chunk
