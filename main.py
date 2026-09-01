@@ -3,7 +3,7 @@ import base64
 import uuid
 import requests
 from flask import Flask, request, jsonify, send_file
-from moviepy.editor import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
+from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 import whisper
 
 app = Flask(__name__)
