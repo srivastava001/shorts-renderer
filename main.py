@@ -8,7 +8,7 @@ import whisper
 
 app = Flask(__name__)
 
-# Load the lightweight model to fit within 512MB RAM limits
+# Load lightweight Whisper model for Render 512MB RAM limit
 model = whisper.load_model("tiny")
 
 @app.route('/', methods=['GET'])
@@ -36,8 +36,9 @@ def render_short():
                 for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
             
-            clip = VideoFileClip(v_path).resize(height=1920)
-            clip = clip.crop(x_center=clip.w / 2, width=1080)
+            # MoviePy v2.0+ uses .resized() and .cropped()
+            clip = VideoFileClip(v_path).resized(height=1920)
+            clip = clip.cropped(x_center=clip.w / 2, width=1080)
             downloaded_clips.append(clip)
 
         # Step B: Handle Audio (URL vs Base64 Data String)
@@ -54,9 +55,9 @@ def render_short():
         
         audio_clip = AudioFileClip(a_path)
 
-        # Step C: Concatenate Clips & Attach Audio
+        # Step C: Concatenate Clips & Attach Audio (MoviePy v2.0+ uses .with_audio)
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
-        base_video = base_video.set_audio(audio_clip)
+        base_video = base_video.with_audio(audio_clip)
 
         # Step D: Transcribe Audio for Word Timestamps
         result = model.transcribe(a_path, word_timestamps=True)
@@ -68,10 +69,11 @@ def render_short():
                 start = word['start']
                 end = word['end']
                 
-                txt_clip = (TextClip(w_text, fontsize=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
-                            .set_position(('center', 1400))
-                            .set_start(start)
-                            .set_duration(max(end - start, 0.1)))
+                # MoviePy v2.0+ text clip syntax
+                txt_clip = (TextClip(text=w_text, font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
+                            .with_position(('center', 1400))
+                            .with_start(start)
+                            .with_duration(max(end - start, 0.1)))
                 subtitle_clips.append(txt_clip)
 
         # Step E: Layer Captions & Export MP4
