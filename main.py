@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 import requests
 from flask import Flask, request, jsonify, Response
 
@@ -18,33 +19,21 @@ def render_short():
     if not video_urls or not audio_url:
         return jsonify({"status": "error", "message": "Missing video_urls or audio_url"}), 400
 
-    # Build an FFmpeg concat filter string dynamically to stream everything in memory
-    # input 0..N-1 are videos, input N is the audio track
-    inputs = []
-    filter_complex = []
-    
-    for idx, url in enumerate(video_urls):
-        inputs.extend(['-i', url])
-        # Scale, crop, and set framerate for each video stream
-        filter_complex.append(f"[{idx}:v]scale=-2:1280,crop=720:1280:(in_w-720)/2:0,fps=24[v{idx}]")
-
-    # Add audio input last
-    audio_idx = len(video_urls)
-    inputs.extend(['-i', audio_url])
-
-    # Concat video streams together
-    v_concat_str = "".join([f"[v{i}]" for i in range(len(video_urls))])
-    filter_complex.append(f"{v_concat_str}concat=n={len(video_urls)}:v=1:a=0[outv]")
-
-    # Combine filter complex arguments
-    full_filter = ";".join(filter_complex)
+    # Create a temporary file to list inputs safely for FFmpeg concat demuxer
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        for url in video_urls:
+            f.write(f"file '{url}'\n")
+        manifest_path = f.name
 
     cmd = [
         'ffmpeg', '-y',
-        *inputs,
-        '-filter_complex', full_filter,
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', manifest_path,
+        '-i', audio_url,
+        '-filter_complex', '[0:v]scale=-2:1280,crop=720:1280:(in_w-720)/2:0,fps=24[outv]',
         '-map', '[outv]',
-        '-map', f'{audio_idx}:a',
+        '-map', '1:a',
         '-c:v', 'libx264',
         '-preset', 'veryfast',
         '-crf', '28',
@@ -66,6 +55,8 @@ def render_short():
         finally:
             process.terminate()
             process.wait()
+            if os.path.exists(manifest_path):
+                os.remove(manifest_path)
 
     return Response(generate(), mimetype='video/mp4')
 
