@@ -7,7 +7,6 @@ from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, 
 from openai import OpenAI
 
 app = Flask(__name__)
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -15,6 +14,13 @@ def health_check():
 
 @app.route('/render-short', methods=['POST'])
 def render_short():
+    # Initialize client dynamically inside the request to prevent startup crashes
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return jsonify({"status": "error", "message": "OPENAI_API_KEY environment variable is missing on Render"}), 500
+        
+    client = OpenAI(api_key=api_key)
+
     data = request.json or {}
     video_urls = data.get('video_urls', [])
     audio_url = data.get('audio_url', '')
@@ -56,7 +62,7 @@ def render_short():
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
         base_video = base_video.with_audio(audio_clip)
 
-        # Step D: Transcribe via OpenAI API (Zero Local RAM Usage)
+        # Step D: Transcribe via OpenAI API
         with open(a_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
                 model="whisper-1",
