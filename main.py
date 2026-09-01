@@ -34,7 +34,7 @@ def render_short():
     output_path = f"/tmp/{job_id}_final.mp4"
     
     try:
-        # Step A: Download & Crop Videos to Vertical 9:16 (1080x1920)
+        # Step A: Download & Crop Videos to Vertical 720x1280 (RAM-Optimized for Render Free Tier)
         for idx, url in enumerate(video_urls):
             v_path = f"/tmp/{job_id}_v_{idx}.mp4"
             v_paths.append(v_path)
@@ -43,8 +43,8 @@ def render_short():
                 for chunk in r.iter_content(chunk_size=1024*1024):
                     f.write(chunk)
             
-            clip = VideoFileClip(v_path).resized(height=1920)
-            clip = clip.cropped(x_center=clip.w / 2, width=1080)
+            clip = VideoFileClip(v_path).resized(height=1280)
+            clip = clip.cropped(x_center=clip.w / 2, width=720)
             downloaded_clips.append(clip)
 
         # Step B: Handle Audio
@@ -81,8 +81,8 @@ def render_short():
         for i, word in enumerate(words_list):
             start = i * time_per_word
             end = start + time_per_word
-            txt_clip = (TextClip(text=word.upper(), font_size=70, color='yellow', font='Impact', stroke_color='black', stroke_width=4)
-                        .with_position(('center', 1400))
+            txt_clip = (TextClip(text=word.upper(), font_size=50, color='yellow', font='Impact', stroke_color='black', stroke_width=3)
+                        .with_position(('center', 950))
                         .with_start(start)
                         .with_duration(max(end - start, 0.1)))
             subtitle_clips.append(txt_clip)
