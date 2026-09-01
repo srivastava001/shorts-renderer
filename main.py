@@ -81,7 +81,7 @@ def render_short():
         for i, word in enumerate(words_list):
             start = i * time_per_word
             end = start + time_per_word
-            txt_clip = (TextClip(text=word.upper(), font_size=50, color='yellow', font='Impact', stroke_color='black', stroke_width=3)
+            txt_clip = (TextClip(text=word.upper(), font_size=50, color='yellow', stroke_color='black', stroke_width=3)
                         .with_position(('center', 950))
                         .with_start(start)
                         .with_duration(max(end - start, 0.1)))
