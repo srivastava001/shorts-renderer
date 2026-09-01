@@ -27,39 +27,39 @@ def render_short():
     
     try:
         processed_v_paths = []
+        # Stream and convert each video URL directly through FFmpeg (Zero raw download storage)
         for idx, url in enumerate(video_urls):
-            raw_v_path = f"/tmp/{job_id}_raw_{idx}.mp4"
             proc_v_path = f"/tmp/{job_id}_v_{idx}.mp4"
-            v_paths.extend([raw_v_path, proc_v_path])
-            
-            r = requests.get(url, stream=True)
-            with open(raw_v_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024*1024):
-                    f.write(chunk)
+            v_paths.append(proc_v_path)
             
             cmd = [
-                'ffmpeg', '-y', '-i', raw_v_path,
+                'ffmpeg', '-y', '-i', url,
                 '-vf', 'scale=-2:1280,crop=720:1280:(in_w-720)/2:0',
                 '-r', '24', '-c:v', 'libx264', '-crf', '28', '-an', proc_v_path
             ]
             subprocess.run(cmd, check=True)
             processed_v_paths.append(proc_v_path)
 
+        # Download Audio track
         r_audio = requests.get(audio_url, stream=True)
         with open(a_path, 'wb') as f:
             for chunk in r_audio.iter_content(chunk_size=1024*1024):
                 f.write(chunk)
+        v_paths.append(a_path)
 
+        # Create FFmpeg concat list file
         with open(list_path, 'w') as f:
             for vp in processed_v_paths:
                 f.write(f"file '{vp}'\n")
         v_paths.append(list_path)
 
+        # Concatenate video parts and merge with audio
         concat_cmd = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_path,
             '-i', a_path, '-c:v', 'copy', '-c:a', 'aac', '-shortest', output_path
         ]
         subprocess.run(concat_cmd, check=True)
+        v_paths.append(output_path)
 
         return jsonify({
             "status": "success",
@@ -70,11 +70,10 @@ def render_short():
         return jsonify({"status": "error", "message": str(e)}), 500
         
     finally:
+        # Cleanup temporary chunks safely after response
         for vp in v_paths:
-            if os.path.exists(vp):
+            if vp != output_path and os.path.exists(vp):
                 os.remove(vp)
-        if os.path.exists(a_path):
-            os.remove(a_path)
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
