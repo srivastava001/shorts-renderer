@@ -29,11 +29,15 @@ def render_short():
 
     job_id = str(uuid.uuid4())[:8]
     downloaded_clips = []
+    v_paths = []
+    a_path = f"/tmp/{job_id}_a.mp3"
+    output_path = f"/tmp/{job_id}_final.mp4"
     
     try:
         # Step A: Download & Crop Videos to Vertical 9:16 (1080x1920)
         for idx, url in enumerate(video_urls):
             v_path = f"/tmp/{job_id}_v_{idx}.mp4"
+            v_paths.append(v_path)
             r = requests.get(url, stream=True)
             with open(v_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=1024*1024):
@@ -43,8 +47,7 @@ def render_short():
             clip = clip.cropped(x_center=clip.w / 2, width=1080)
             downloaded_clips.append(clip)
 
-        # Step B: Handle Audio (URL vs Base64 Data String)
-        a_path = f"/tmp/{job_id}_a.mp3"
+        # Step B: Handle Audio
         if audio_url.startswith("data:audio") or ";base64," in audio_url:
             base64_data = audio_url.split(";base64,")[-1]
             with open(a_path, 'wb') as f:
@@ -61,10 +64,10 @@ def render_short():
         base_video = concatenate_videoclips(downloaded_clips, method="compose")
         base_video = base_video.with_audio(audio_clip)
 
-        # Step D: Transcribe via Gemini API
+        # Step D: Transcribe via Gemini API using gemini-3.6-flash
         uploaded_audio = client.files.upload(file=a_path)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=[uploaded_audio, "Provide a clean transcript of the speech in this audio."]
         )
         
@@ -84,14 +87,18 @@ def render_short():
                         .with_duration(max(end - start, 0.1)))
             subtitle_clips.append(txt_clip)
 
-        # Step E: Layer Captions & Export MP4
+        # Step E: Layer Captions & Export MP4 (fps=24 saves memory)
         final_video = CompositeVideoClip([base_video] + subtitle_clips)
-        output_path = f"/tmp/{job_id}_final.mp4"
-        final_video.write_videofile(output_path, fps=30, codec="libx264", audio_codec="aac")
+        final_video.write_videofile(output_path, fps=24, codec="libx264", audio_codec="aac")
 
-        # Memory Cleanup
+        # Explicitly close all clips to free up RAM
+        for clip in downloaded_clips:
+            clip.close()
         base_video.close()
         audio_clip.close()
+        final_video.close()
+        for txt in subtitle_clips:
+            txt.close()
 
         return jsonify({
             "status": "success",
@@ -100,6 +107,14 @@ def render_short():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+        
+    finally:
+        # Clean up temporary files from disk
+        for vp in v_paths:
+            if os.path.exists(vp):
+                os.remove(vp)
+        if os.path.exists(a_path):
+            os.remove(a_path)
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
